@@ -7,6 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,700;1,500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#db4b85">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A9%B7%3C/text%3E%3C/svg%3E">
 <!-- Pustaka QR: dicoba dari folder lib/ dulu (offline), kalau tidak ada baru dari internet -->
 <script src="lib/qrcode.min.js"></script>
@@ -200,6 +203,14 @@
   }
   .chip.on { background: var(--brand); border-color: var(--brand); color: #fff; }
   .chip-label { font-size: 11.5px; color: var(--ink-soft); margin: 10px 0 0; }
+  .tb { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .tb th { color: var(--ink-soft); font-weight: 600; padding: 6px; border-bottom: 1.5px solid var(--line); white-space: nowrap; }
+  .tb td { padding: 6px; border-bottom: 1px dashed var(--line); white-space: nowrap; }
+  .tb tr.tot td { font-weight: 700; color: var(--brand-dark); }
+  .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 6px; }
+  .kpi .k { background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: var(--card-shadow); }
+  .kpi .k span { display: block; font-size: 11.5px; color: var(--ink-soft); }
+  .kpi .k b { font-family: 'Fraunces', serif; font-size: 17px; color: var(--brand-dark); }
   .is-hidden { display: none !important; }
 </style>
 </head>
@@ -219,6 +230,7 @@
   <p class="hint" id="hp-status" style="margin:0 0 6px;">Menghubungkan ke laptop…</p>
   <div id="hp-reader" style="width:100%;max-width:360px;margin:10px 0;"></div>
   <button class="btn" id="btn-hp-kamera" style="max-width:360px;">Nyalakan kamera</button>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:10px;max-width:360px;"><input type="checkbox" id="hp-opsi-banyak" checked> Deteksi banyak QR sekaligus (jika didukung)</label>
   <div id="hp-hasil" class="card" style="width:100%;max-width:360px;margin-top:14px;text-align:center;font-size:14px;">Belum ada yang discan.</div>
   <p class="hint" style="max-width:360px;">HP ini hanya untuk scan. Keranjang, data pelanggan, dan struk muncul di laptop.</p>
 </div>
@@ -348,6 +360,8 @@
     <div class="card">
       <h2 class="section-title" style="margin-bottom:14px;">Pindai QR produk</h2>
       <button class="btn" id="btn-scan">Nyalakan kamera</button>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:10px;"><input type="checkbox" id="opsi-banyak" checked> Deteksi banyak QR sekaligus (jika didukung)</label>
+      <p class="hint" id="scan-mode" style="text-align:left;margin:4px 0 0;"></p>
       <div id="reader" style="display:none; margin-top:14px;"></div>
       <p class="hint">Perlu izin akses kamera. Kalau kamera tidak bisa dipakai, ketik atau tempel kode produk manual di bawah.</p>
       <div class="field" style="margin-top:14px;">
@@ -373,6 +387,8 @@
     <h2 class="section-title">Laporan penjualan &amp; laba</h2>
     <div class="field"><select id="lap-periode"><option value="hari">Hari ini</option><option value="7">7 hari terakhir</option><option value="bulan">Bulan ini</option><option value="semua">Semua waktu</option><option value="rentang">Pilih tanggal…</option></select></div>
     <div id="lap-rentang" style="display:none;gap:8px;margin-bottom:12px;"><input type="date" id="lap-dari" style="flex:1;min-width:0;"><input type="date" id="lap-sampai" style="flex:1;min-width:0;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;"><button class="btn small" id="btn-lap-pdf" style="flex:1;">Unduh PDF</button><button class="btn small" id="btn-lap-xlsx" style="flex:1;">Unduh Excel</button></div>
+    <p class="hint" style="text-align:left;margin:-6px 0 12px;">PDF: di jendela cetak pilih "Simpan sebagai PDF".</p>
     <div id="lap-isi"></div>
   </section>
 
@@ -422,7 +438,8 @@ function saveTotalSold() {
 }
 let receipts = [];
 let cart = [];
-let html5QrCode = null;
+let scanner = null;
+const scanSeen = {};
 
 const SEED_PRODUCTS = [
   { nama: 'Blouse Satin Peach', harga: 42000, kategori: 'Atasan', kondisi: 'Sangat baik', tipe: 'shirt' },
@@ -602,7 +619,7 @@ function renderKatalog() {
       <span class="badge ${dp ? 'terjual' : 'tersedia'}">${dp ? 'Dipesan' + (p.pemesan && p.pemesan.nama ? ': ' + escapeHtml(p.pemesan.nama) : '') : 'Tersedia'}</span>
       <button class="btn ghost small" style="margin-top:8px;width:100%;" onclick="toggleProdQR('${p.id}', this)">Lihat QR</button><div class="prod-qr" id="qr-${p.id}" style="display:none;margin-top:8px;text-align:center;"></div>
       ${dp ? `<button class="btn ghost small" style="margin-top:6px;width:100%;" onclick="batalPesan('${p.id}')">Batalkan pesanan</button>` : `<button class="btn ghost small" style="margin-top:6px;width:100%;" onclick="bukaPesan('${p.id}')">Tandai dipesan</button>`}
-      ${isAdmin() ? `<button class="btn ghost small" style="margin-top:6px;width:100%;" onclick="editProduk('${p.id}')">Ubah produk</button>` : ''}
+      ${isAdmin() ? `<button class="btn ghost small" style="margin-top:6px;width:100%;" onclick="editProduk('${p.id}')">Ubah produk</button><button class="btn ghost small" style="margin-top:6px;width:100%;" onclick="hapusProduk('${p.id}', this)">Hapus produk</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -642,6 +659,16 @@ function batalPesan(id) {
   saveProducts();
   renderKatalog();
   showToast('Pesanan dibatalkan');
+}
+function hapusProduk(id, btn) {
+  armConfirm(btn, () => {
+    products = products.filter(x => x.id !== id);
+    cart = cart.filter(c => c.id !== id);
+    saveProducts();
+    renderKatalog();
+    renderCart();
+    showToast('Produk dihapus');
+  });
 }
 function armConfirm(btn, action) {
   if (btn.dataset.armed === '1') {
@@ -685,7 +712,7 @@ function bigQR(id) {
   ov.addEventListener('click', () => ov.remove());
   document.body.appendChild(ov);
   const sz = Math.max(160, Math.min(300, window.innerWidth - 120));
-  new QRCode(document.getElementById('big-qr'), { text: p.id, width: sz, height: sz, colorDark: '#6b1238', colorLight: '#ffffff' });
+  new QRCode(document.getElementById('big-qr'), { correctLevel: QRCode.CorrectLevel.M, text: urlKode(p.id), width: sz, height: sz, colorDark: '#6b1238', colorLight: '#ffffff' });
 }
 function cetakSemuaLabel() {
   if (typeof QRCode === 'undefined') { showToast('Pustaka QR belum termuat (perlu internet)'); return; }
@@ -694,7 +721,7 @@ function cetakSemuaLabel() {
   document.body.appendChild(tmp);
   const cells = products.map(p => {
     tmp.innerHTML = '';
-    new QRCode(tmp, { text: p.id, width: 160, height: 160, colorDark: '#6b1238', colorLight: '#ffffff' });
+    new QRCode(tmp, { correctLevel: QRCode.CorrectLevel.M, text: urlKode(p.id), width: 160, height: 160, colorDark: '#6b1238', colorLight: '#ffffff' });
     const c = tmp.querySelector('canvas');
     const src = c ? c.toDataURL('image/png') : '';
     return `<div class="c"><img src="${src}" alt=""><b>${escapeHtml(p.nama)}</b><span>${formatRupiah(p.harga)} · ${escapeHtml(p.ukuran || '')}</span><i>${escapeHtml(p.id)}</i></div>`;
@@ -707,6 +734,14 @@ function cetakSemuaLabel() {
 }
 document.getElementById('btn-cetak-semua').addEventListener('click', cetakSemuaLabel);
 // ===== Scanner HP -> data masuk ke laptop (koneksi langsung lewat PeerJS) =====
+function ekstrakKode(t) {
+  t = String(t).trim();
+  try { const k = new URL(t).searchParams.get('k'); if (k) return k.trim().toUpperCase(); } catch (e) {}
+  return t.toUpperCase();
+}
+function urlKode(id) {
+  return /^https?:/.test(location.protocol) ? location.href.split('#')[0].split('?')[0] + '?k=' + encodeURIComponent(id) : id;
+}
 function waitFor(cond, ok, fail, ms) {
   const t0 = Date.now();
   (function cek() {
@@ -733,7 +768,9 @@ function mulaiHubungHP() {
   info.innerHTML = '<p class="hint" style="margin:0;">Memuat pustaka koneksi…</p>';
   document.getElementById('btn-hp-link').style.display = 'none';
   waitFor(() => typeof Peer !== 'undefined', () => {
-    const id = 'nt' + Math.random().toString(36).slice(2, 8);
+    let id = null;
+    try { id = localStorage.getItem('nayla_pair_id'); } catch (e) {}
+    if (!id) { id = 'nt' + Math.random().toString(36).slice(2, 8); try { localStorage.setItem('nayla_pair_id', id); } catch (e) {} }
     const url = location.href.split('#')[0].split('?')[0] + '?scan=' + id;
     lapPeer = new Peer(id);
     lapPeer.on('open', () => {
@@ -742,7 +779,7 @@ function mulaiHubungHP() {
         <p class="hint" id="hp-link-status" style="font-weight:700;margin:4px 0;">Menunggu HP…</p>
         <button class="btn ghost small" id="btn-hp-salin" style="margin-top:6px;">Salin link</button>
         <button class="btn ghost small" id="btn-hp-putus" style="margin-top:6px;">Putuskan</button>`;
-      try { new QRCode(document.getElementById('hp-link-qr'), { text: url, width: 180, height: 180, colorDark: '#000000', colorLight: '#ffffff' }); }
+      try { new QRCode(document.getElementById('hp-link-qr'), { correctLevel: QRCode.CorrectLevel.M, text: url, width: 180, height: 180, colorDark: '#000000', colorLight: '#ffffff' }); }
       catch (e) { document.getElementById('hp-link-qr').textContent = url; }
       document.getElementById('btn-hp-salin').onclick = () => { if (fallbackCopy(url)) showToast('Link disalin, kirim ke HP'); };
       document.getElementById('btn-hp-putus').onclick = akhiriHubungHP;
@@ -763,7 +800,7 @@ function mulaiHubungHP() {
       conn.on('close', () => { hpConns = hpConns.filter(c => c !== conn); setHpLinkStatus(hpConns.length ? 'HP terhubung ✓ (' + hpConns.length + ')' : 'HP terputus. Scan ulang QR ini di HP.'); });
     });
     lapPeer.on('error', err => {
-      if (err && err.type === 'unavailable-id') { akhiriHubungHP(); mulaiHubungHP(); return; }
+      if (err && err.type === 'unavailable-id') { try { localStorage.removeItem('nayla_pair_id'); } catch (e) {} akhiriHubungHP(); mulaiHubungHP(); return; }
       setHpLinkStatus('Koneksi gagal: ' + (err && err.type ? err.type : 'tidak diketahui'));
     });
   }, () => {
@@ -774,17 +811,21 @@ function mulaiHubungHP() {
 document.getElementById('btn-hp-link').addEventListener('click', mulaiHubungHP);
 
 // --- sisi HP: mode scanner ---
-let hpPeer = null, hpConn = null, hpScanner = null, hpLast = { code: '', ts: 0 };
+let hpPeer = null, hpConn = null, hpScanner = null, hpSeen = {};
 function hpStatus(t) { document.getElementById('hp-status').textContent = t; }
 function hpHasil(t) { document.getElementById('hp-hasil').textContent = t; }
-function startHpMode(laptopId) {
+function startHpMode(laptopId, kodeAwal) {
+  try { localStorage.setItem('nayla_hp_laptop_id', laptopId); } catch (e) {}
   document.getElementById('hp-mode').style.display = 'flex';
   hpStatus('Menghubungkan ke laptop…');
   waitFor(() => typeof Peer !== 'undefined', () => {
     hpPeer = new Peer();
     hpPeer.on('open', () => {
       hpConn = hpPeer.connect(laptopId, { reliable: true });
-      hpConn.on('open', () => hpStatus('Terhubung ke laptop ✓'));
+      hpConn.on('open', () => {
+        hpStatus('Terhubung ke laptop ✓');
+        if (kodeAwal) { hpConn.send({ kode: kodeAwal }); hpHasil('Terkirim: ' + kodeAwal); }
+      });
       hpConn.on('data', d => {
         if (!d) return;
         hpHasil(d.nama ? d.nama + ' — ' + formatRupiah(d.harga) + ' (' + d.status + ')' : 'Kode ' + d.kode + ' ' + d.status);
@@ -796,9 +837,8 @@ function startHpMode(laptopId) {
   }, () => hpStatus('Pustaka koneksi gagal dimuat (perlu internet).'), 10000);
 }
 function hpOnScan(text) {
-  const code = String(text).trim().toUpperCase();
-  if (code === hpLast.code && Date.now() - hpLast.ts < 2500) return;
-  hpLast = { code, ts: Date.now() };
+  const code = ekstrakKode(text);
+  if (!barukah(hpSeen, code, 2000)) return;
   if (!hpConn || !hpConn.open) { hpStatus('Belum terhubung ke laptop'); return; }
   hpConn.send({ kode: code });
   hpHasil('Terkirim: ' + code);
@@ -807,18 +847,15 @@ function hpOnScan(text) {
 }
 document.getElementById('btn-hp-kamera').addEventListener('click', async () => {
   const btn = document.getElementById('btn-hp-kamera');
-  if (hpScanner) {
-    try { await hpScanner.stop(); hpScanner.clear(); } catch (e) {}
-    hpScanner = null; btn.textContent = 'Nyalakan kamera'; return;
-  }
-  if (typeof Html5Qrcode === 'undefined') { hpStatus('Pustaka scan belum termuat (perlu internet).'); return; }
-  hpScanner = new Html5Qrcode('hp-reader');
+  if (hpScanner) { const sc = hpScanner; hpScanner = null; await sc.stop(); btn.textContent = 'Nyalakan kamera'; return; }
+  btn.textContent = 'Matikan kamera';
   try {
-    await hpScanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 220 }, hpOnScan, () => {});
-    btn.textContent = 'Matikan kamera';
+    hpScanner = await mulaiScanner('hp-reader', hpOnScan, document.getElementById('hp-opsi-banyak').checked);
+    hpStatus((hpConn && hpConn.open ? 'Terhubung ke laptop ✓' : 'Belum terhubung ke laptop') + ' · ' + (hpScanner.mode === 'banyak' ? 'mode banyak QR sekaligus' : 'mode satu per satu'));
   } catch (e) {
     hpScanner = null;
-    hpStatus('Kamera tidak bisa dibuka. Izinkan akses kamera dan buka lewat Chrome.');
+    btn.textContent = 'Nyalakan kamera';
+    hpStatus(e && e.message === 'lib' ? 'Pustaka scan belum termuat (perlu internet).' : 'Kamera tidak bisa dibuka. Izinkan akses kamera dan buka lewat Chrome.');
   }
 });
 function copyProdCode(el) {
@@ -875,7 +912,7 @@ function toggleProdQR(id, btn) {
   if (!box) return;
   if (box.style.display === 'none') {
     if (!box.dataset.rendered) {
-      new QRCode(box, { text: id, width: 120, height: 120, colorDark: '#6b1238', colorLight: '#ffffff' });
+      new QRCode(box, { correctLevel: QRCode.CorrectLevel.M, text: urlKode(id), width: 150, height: 150, colorDark: '#6b1238', colorLight: '#ffffff' });
       box.dataset.rendered = '1';
       const saveBtn = document.createElement('button');
       saveBtn.className = 'btn ghost small';
@@ -1007,7 +1044,7 @@ document.getElementById('btn-generate').addEventListener('click', () => {
   const preview = document.getElementById('qr-preview');
   preview.innerHTML = '';
   try {
-    new QRCode(preview, { text: id, width: 180, height: 180, colorDark: '#6b1238', colorLight: '#ffffff' });
+    new QRCode(preview, { correctLevel: QRCode.CorrectLevel.M, text: urlKode(id), width: 200, height: 200, colorDark: '#6b1238', colorLight: '#ffffff' });
     preview.insertAdjacentHTML('beforeend', `<p class="prod-code" style="margin-top:10px;cursor:pointer;" onclick="copyProdCode(this)" data-code="${escapeHtml(id)}" title="Tekan untuk salin kode">Kode: ${escapeHtml(id)}</p>`);
   } catch (e) {
     preview.innerHTML = '<p class="hint">QR gagal dibuat (pustaka QR belum termuat, perlu internet).</p>';
@@ -1042,72 +1079,198 @@ document.getElementById('btn-print').addEventListener('click', () => {
   w.document.close();
 });
 
-// Transaksi: scan — coba beberapa cara sebelum menyerah
-document.getElementById('btn-scan').addEventListener('click', async () => {
-  if (typeof Html5Qrcode === 'undefined') { showToast('Pustaka scan belum termuat (perlu internet). Ketik kode produk manual di bawah.'); return; }
-  const readerEl = document.getElementById('reader');
-  const scanBtn = document.getElementById('btn-scan');
-  if (html5QrCode) { stopScan(); return; }
-  readerEl.style.display = 'block';
-  scanBtn.textContent = 'Matikan kamera';
-  html5QrCode = new Html5Qrcode('reader');
-  const config = { fps: 10, qrbox: 220 };
-
-  async function tryStart(cameraConfig) {
-    return html5QrCode.start(cameraConfig, config, onScanSuccess, () => {});
-  }
-
+// ===== Mesin scan: banyak QR sekaligus (BarcodeDetector) atau cadangan html5-qrcode =====
+function barukah(map, code, gap) {
+  const now = Date.now(), prev = map[code];
+  map[code] = now;
+  return !prev || now - prev > gap;
+}
+async function dukungBanyak() {
+  try { return 'BarcodeDetector' in window && (await BarcodeDetector.getSupportedFormats()).includes('qr_code'); } catch (e) { return false; }
+}
+async function mulaiNative(readerId, onKode) {
+  const box = document.getElementById(readerId);
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+  box.innerHTML = '<video playsinline muted autoplay style="width:100%;border-radius:12px;background:#000;"></video>';
+  const video = box.querySelector('video');
+  video.srcObject = stream;
+  await video.play();
+  const det = new BarcodeDetector({ formats: ['qr_code'] });
+  let jalan = true, sibuk = false;
+  const timer = setInterval(async () => {
+    if (!jalan || sibuk || video.readyState < 2) return;
+    sibuk = true;
+    try { (await det.detect(video)).forEach(h => { if (h.rawValue) onKode(h.rawValue); }); } catch (e) {}
+    sibuk = false;
+  }, 200);
+  return { stop: async () => { jalan = false; clearInterval(timer); stream.getTracks().forEach(t => t.stop()); box.innerHTML = ''; } };
+}
+async function mulaiHtml5(readerId, onKode) {
+  if (typeof Html5Qrcode === 'undefined') throw new Error('lib');
+  const q = new Html5Qrcode(readerId);
+  const cfg = { fps: 10 }; // tanpa kotak kecil: seluruh layar kamera dipindai
   try {
-    // 1) coba minta daftar kamera dulu & pilih kamera belakang kalau ada
     const cams = await Html5Qrcode.getCameras().catch(() => []);
     if (cams && cams.length) {
       const back = cams.find(c => /back|rear|environment/i.test(c.label)) || cams[cams.length - 1];
-      await tryStart(back.id);
+      await q.start(back.id, cfg, t => onKode(t), () => {});
     } else {
-      await tryStart({ facingMode: 'environment' });
+      await q.start({ facingMode: 'environment' }, cfg, t => onKode(t), () => {});
     }
   } catch (e1) {
-    try {
-      // 2) fallback: constraint sederhana
-      await tryStart({ facingMode: 'environment' });
-    } catch (e2) {
-      showToast('Kamera diblokir di tampilan ini. Buka link di Chrome, atau ketik kode produk manual di bawah.');
-            stopScan();
-    }
+    await q.start({ facingMode: 'environment' }, cfg, t => onKode(t), () => {});
+  }
+  return { stop: async () => { try { await q.stop(); q.clear(); } catch (e) {} } };
+}
+async function mulaiScanner(readerId, onKode, banyak) {
+  if (banyak && await dukungBanyak()) {
+    try { const sc = await mulaiNative(readerId, onKode); sc.mode = 'banyak'; return sc; } catch (e) { /* lanjut ke cadangan */ }
+  }
+  const sc = await mulaiHtml5(readerId, onKode);
+  sc.mode = 'satu';
+  return sc;
+}
+document.getElementById('btn-scan').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-scan');
+  if (scanner) { stopScan(); return; }
+  document.getElementById('reader').style.display = 'block';
+  btn.textContent = 'Matikan kamera';
+  try {
+    scanner = await mulaiScanner('reader', onScanSuccess, document.getElementById('opsi-banyak').checked);
+    document.getElementById('scan-mode').textContent = scanner.mode === 'banyak'
+      ? 'Mode banyak QR sekaligus: arahkan ke beberapa label, semuanya terbaca.'
+      : 'Mode satu per satu: scan terus, QR berikutnya otomatis masuk.';
+  } catch (e) {
+    scanner = null;
+    stopScan();
+    showToast(e && e.message === 'lib' ? 'Pustaka scan belum termuat (perlu internet). Ketik kode produk manual di bawah.' : 'Kamera tidak bisa dibuka. Izinkan akses kamera, atau ketik kode produk manual di bawah.');
   }
 });
 function stopScan() {
-  if (html5QrCode) {
-    html5QrCode.stop().then(() => html5QrCode.clear()).catch(() => {});
-    html5QrCode = null;
-  }
+  if (scanner) { const sc = scanner; scanner = null; sc.stop(); }
   document.getElementById('reader').style.display = 'none';
   document.getElementById('btn-scan').textContent = 'Nyalakan kamera';
+  document.getElementById('scan-mode').textContent = '';
 }
+let manualSel = null; // produk yang dipilih lewat kode manual: { id, harga, edit }
+function idxKeranjang(id) { return cart.findIndex(c => c.id === id); }
+const qtyBaris = c => c.qty || 1;
+function flatCart() { return cart.flatMap(c => Array.from({ length: qtyBaris(c) }, () => c)); }
 function updateManualPreview() {
   const box = document.getElementById('manual-code-preview');
-  const input = document.getElementById('manual-code');
-  const code = input.value.trim().toUpperCase();
-  if (!code) { box.innerHTML = ''; return; }
+  const code = ekstrakKode(document.getElementById('manual-code').value);
+  if (!code) { manualSel = null; box.innerHTML = ''; return; }
   const p = products.find(x => x.id === code);
   if (p) {
-    // kode cocok: langsung masuk keranjang dan form nama + nomor HP pelanggan muncul
-    onScanSuccess(code);
-    input.value = '';
-    box.innerHTML = `<span style="color:var(--ok);font-weight:700;">✓ ${escapeHtml(p.nama)}</span> · ${formatRupiah(p.harga)} — isi data pelanggan di bawah`;
-    const nameEl = document.getElementById('p-customer');
-    if (nameEl) {
-      nameEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      nameEl.focus({ preventScroll: true });
-    }
+    if (!manualSel || manualSel.id !== p.id) manualSel = { id: p.id, harga: p.harga, edit: false, qty: 1 };
+    renderManualCard();
     return;
   }
+  manualSel = null;
   box.innerHTML = code.length >= 7
     ? '<span style="color:#c0392b;">Kode tidak ditemukan atau produknya sudah terjual — cek lagi penulisannya</span>'
     : 'Lanjut ketik atau tempel kode lengkap…';
 }
+function renderManualCard() {
+  const box = document.getElementById('manual-code-preview');
+  const p = manualSel && products.find(x => x.id === manualSel.id);
+  if (!p) { manualSel = null; return; }
+  const ci = idxKeranjang(p.id);
+  const harga = ci >= 0 ? cart[ci].harga : manualSel.harga;
+  const q = manualSel.qty || 1;
+  const thumb = (p.foto && p.foto.indexOf('data:image/') === 0)
+    ? `<img src="${p.foto}" alt="" style="width:56px;height:56px;border-radius:12px;object-fit:cover;flex:none;">`
+    : productIconSVG(p.tipe, 0);
+  const inp = 'padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;';
+  box.innerHTML = `<div style="border:1.5px solid var(--brand);border-radius:12px;padding:12px;">
+    <div style="display:flex;gap:10px;align-items:center;">${thumb}
+      <div style="flex:1;text-align:left;">
+        <div style="font-weight:700;font-size:14.5px;color:var(--ink);">${escapeHtml(p.nama)}</div>
+        <div class="hint" style="text-align:left;margin:2px 0 0;">${escapeHtml(p.kategori || '-')} · ${escapeHtml(p.kondisi || '-')} · Ukuran ${escapeHtml(p.ukuran || '-')}</div>
+        <div style="font-family:'Fraunces',serif;font-weight:700;color:var(--brand-dark);">${formatRupiah(harga)}${harga !== p.harga ? ` <span class="hint" style="text-decoration:line-through;margin:0;">${formatRupiah(p.harga)}</span>` : ''} <span class="hint" style="margin:0;">/ pcs</span></div>
+      </div></div>
+    <div style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;">
+      <span class="hint" style="margin:0;font-weight:600;">Jumlah ditambahkan</span>
+      <button class="btn ghost small" style="width:36px;padding:6px 0;" onclick="ubahQtyManual(-1)">−</button>
+      <input id="manual-qty" type="number" inputmode="numeric" min="1" max="99" value="${q}" onchange="setQtyManual(this.value)" style="width:56px;text-align:center;${inp}">
+      <button class="btn ghost small" style="width:36px;padding:6px 0;" onclick="ubahQtyManual(1)">+</button>
+    </div>
+    <div style="text-align:left;font-size:13.5px;margin:4px 0;">Nominal ditambahkan: ${formatRupiah(harga)} × ${q} = <b style="color:var(--brand-dark);">${formatRupiah(harga * q)}</b></div>
+    ${ci >= 0 ? `<div style="text-align:left;font-size:13.5px;margin:4px 0;color:var(--ok);font-weight:600;">Di keranjang: ${qtyBaris(cart[ci])} pcs = ${formatRupiah(cart[ci].harga * qtyBaris(cart[ci]))}</div>` : '<div class="hint" style="text-align:left;margin:4px 0;">Belum masuk keranjang</div>'}
+    ${manualSel.edit ? `<div style="display:flex;gap:6px;margin:8px 0;"><input id="manual-harga" type="number" inputmode="numeric" value="${harga}" style="flex:1;min-width:0;${inp}"><button class="btn small" style="width:auto;" onclick="simpanManualHarga()">Simpan</button><button class="btn ghost small" style="width:auto;" onclick="manualSel.edit=false;renderManualCard()">Batal</button></div>` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button class="btn small" style="flex:1 1 45%;" onclick="tambahManual()">${ci >= 0 ? 'Tambah lagi (+' + q + ')' : 'Tambah' + (q > 1 ? ' (' + q + ')' : '')}</button>
+      ${ci >= 0 ? '<button class="btn ghost small" style="flex:1 1 45%;" onclick="kurangiManual()">Kurangi (−1)</button>' : ''}
+      <button class="btn ghost small" style="flex:1 1 45%;" onclick="editManual()">Edit harga</button>
+      <button class="btn ghost small" style="flex:1 1 45%;" onclick="hapusManual()">${ci >= 0 ? 'Hapus' : 'Batal'}</button>
+    </div>
+    ${isAdmin() ? `<button class="btn ghost small" style="width:100%;margin-top:6px;" onclick="editProduk('${p.id}')">Ubah data produk</button>` : ''}
+  </div>`;
+}
+function ubahQtyManual(d) { if (!manualSel) return; manualSel.qty = Math.max(1, Math.min(99, (manualSel.qty || 1) + d)); renderManualCard(); }
+function setQtyManual(v) { if (!manualSel) return; manualSel.qty = Math.max(1, Math.min(99, Math.round(Number(v)) || 1)); renderManualCard(); }
+function tambahManual() {
+  const p = manualSel && products.find(x => x.id === manualSel.id);
+  if (!p) return;
+  const q = manualSel.qty || 1;
+  const ci = idxKeranjang(p.id);
+  if (p.status === 'Dipesan' && ci < 0) showToast('Dipesan atas nama ' + ((p.pemesan && p.pemesan.nama) || '-'));
+  if (ci >= 0) cart[ci].qty = qtyBaris(cart[ci]) + q;
+  else cart.push({ ...p, harga: manualSel.harga, hargaAsli: p.harga, qty: q });
+  const harga = cart[idxKeranjang(p.id)].harga;
+  manualSel.edit = false;
+  manualSel.qty = 1;
+  playScanBeep();
+  renderCart();
+  showToast('Ditambahkan: ' + q + ' × ' + p.nama + ' = ' + formatRupiah(harga * q));
+  const nameEl = document.getElementById('p-customer');
+  if (nameEl && ci < 0) { nameEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); nameEl.focus({ preventScroll: true }); }
+}
+function kurangiManual() {
+  if (!manualSel) return;
+  const ci = idxKeranjang(manualSel.id);
+  if (ci < 0) return;
+  if (qtyBaris(cart[ci]) <= 1) { hapusItem(ci); return; }
+  cart[ci].qty = qtyBaris(cart[ci]) - 1;
+  renderCart();
+  showToast('Dikurangi 1: ' + cart[ci].nama);
+}
+function editManual() {
+  if (!manualSel) return;
+  manualSel.edit = true;
+  renderManualCard();
+  const el = document.getElementById('manual-harga');
+  if (el) { el.focus(); el.select(); }
+}
+function simpanManualHarga() {
+  const v = Number(document.getElementById('manual-harga').value);
+  if (!(v >= 0)) { showToast('Isi harga yang benar'); return; }
+  manualSel.harga = Math.round(v);
+  manualSel.edit = false;
+  const ci = idxKeranjang(manualSel.id);
+  if (ci >= 0) { cart[ci].harga = manualSel.harga; renderCart(); } else { renderManualCard(); }
+  showToast('Harga diubah untuk transaksi ini');
+}
+function hapusManual() {
+  if (!manualSel) return;
+  const ci = idxKeranjang(manualSel.id);
+  if (ci >= 0) { hapusItem(ci); return; } // keluarkan dari keranjang
+  manualSel = null;
+  document.getElementById('manual-code').value = '';
+  document.getElementById('manual-code-preview').innerHTML = '';
+}
 document.getElementById('manual-code').addEventListener('input', updateManualPreview);
-let lastScan = { code: '', ts: 0 };
+document.getElementById('manual-code').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && manualSel) tambahManual();
+});
+function pilihProduk(id) {
+  document.getElementById('manual-code').value = id;
+  manualSel = null;
+  updateManualPreview();
+  const box = document.getElementById('manual-code-preview');
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function pilihDariKeranjang(id) { pilihProduk(id); }
 function playScanBeep() {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1124,15 +1287,13 @@ function playScanBeep() {
   } catch (e) {}
 }
 function onScanSuccess(decodedText) {
-  const code = String(decodedText).trim().toUpperCase();
-  const now = Date.now();
-  if (code === lastScan.code && now - lastScan.ts < 2500) return; // cegah deteksi berulang oleh kamera
-  lastScan = { code, ts: now };
+  const code = ekstrakKode(decodedText);
+  if (!barukah(scanSeen, code, 2000)) return; // QR yang masih terlihat kamera tidak diproses berulang
   const p = products.find(x => x.id === code);
   if (!p) { showToast('QR tidak dikenali'); return; }
   if (p.status === 'Dipesan') showToast('Dipesan atas nama ' + ((p.pemesan && p.pemesan.nama) || '-'));
   if (cart.find(c => c.id === p.id)) { showToast('Produk sudah di keranjang'); return; }
-  cart.push(p);
+  cart.push({ ...p, hargaAsli: p.harga });
   renderCart();
   playScanBeep();
     showToast('Ditambahkan: ' + p.nama);
@@ -1206,20 +1367,45 @@ function infoDiskonBerikutnya(n) {
   if (!next) return 'Diskon maksimal ' + DISKON_TIERS[0].pct + '% sudah didapat! 🎉';
   return 'Tambah ' + (next.min - n) + ' produk lagi, diskon jadi ' + next.pct + '%!';
 }
-function renderCart() {
+let cartEdit = -1;
+function ubahHargaItem(i) { cartEdit = i; renderCart(); const el = document.getElementById('edit-harga'); if (el) { el.focus(); el.select(); } }
+function batalEditItem() { cartEdit = -1; renderCart(); }
+function simpanHargaItem(i) {
+  const raw = document.getElementById('edit-harga').value;
+  const v = Number(raw);
+  if (raw === '' || !(v >= 0)) { showToast('Isi harga yang benar'); return; }
+  cart[i].harga = Math.round(v);
+  cartEdit = -1;
+  renderCart();
+  showToast('Harga diubah untuk transaksi ini');
+}
+function hapusItem(i) {
+  const nama = cart[i] && cart[i].nama;
+  cart.splice(i, 1);
+  cartEdit = -1;
+  renderCart();
+  showToast('Dihapus dari keranjang: ' + nama);
+}
+function kosongkanKeranjang() { cart = []; cartEdit = -1; renderCart(); showToast('Keranjang dikosongkan'); }
+function renderCart() { renderCartInti(); if (manualSel) renderManualCard(); }
+function renderCartInti() {
   const el = document.getElementById('cart');
-  if (!cart.length) { el.innerHTML = ''; return; }
-  const hd = hitungDiskon(cart);
+  if (!cart.length) { el.innerHTML = ''; cartEdit = -1; return; }
+  const flat = flatCart();
+  const hd = hitungDiskon(flat);
   const g = id => { const x = document.getElementById(id); return x ? x.value : ''; };
   const keep = { nama: g('p-customer'), hp: g('p-phone'), pay: g('p-cart-payment'), bank: g('p-cart-payment-bank'), cash: g('p-cart-cash') };
   const lbl = 'display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:5px;';
-  el.innerHTML = cart.map(p => `
-    <div class="cart-item"><span>${escapeHtml(p.nama)}<br><span class="prod-code" style="margin:2px 0 0;">${escapeHtml(p.id)}</span></span><span>${formatRupiah(p.harga)}</span></div>
-  `).join('') + `
+  const kode = p => `<span class="prod-code" style="margin:2px 0 0;">${escapeHtml(p.id)}</span>`;
+  el.innerHTML = cart.map((p, i) => `<div class="cart-item" style="gap:8px;align-items:flex-start;cursor:pointer;" onclick="pilihDariKeranjang('${p.id}')"><span style="flex:1;">${escapeHtml(p.nama)}<br>${kode(p)}${qtyBaris(p) > 1 ? `<br><span class="hint" style="margin:0;text-align:left;">${qtyBaris(p)} × ${formatRupiah(p.harga)}</span>` : ''}</span>
+        <span style="text-align:right;">${formatRupiah(p.harga * qtyBaris(p))}${p.hargaAsli != null && p.hargaAsli !== p.harga ? `<br><span class="hint" style="margin:0;text-decoration:line-through;">${formatRupiah(p.hargaAsli * qtyBaris(p))}</span>` : ''}</span></div>`
+  ).join('') + `
     ${hd.pct ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;padding-top:10px;"><span>Subtotal</span><span>${formatRupiah(hd.subtotal)}</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:13.5px;padding-top:4px;color:var(--ok);font-weight:700;"><span>Diskon ${hd.pct}% (beli ${cart.length} produk)</span><span>-${formatRupiah(hd.diskon)}</span></div>` : ''}
+    <div style="display:flex;justify-content:space-between;font-size:13.5px;padding-top:4px;color:var(--ok);font-weight:700;"><span>Diskon ${hd.pct}% (beli ${flat.length} pcs)</span><span>-${formatRupiah(hd.diskon)}</span></div>` : ''}
+    <p class="hint" style="text-align:left;margin:6px 0 0;">Ketuk item untuk ubah harga atau hapus.</p>
     <div class="cart-total"><span>Total bayar</span><span>${formatRupiah(hd.total)}</span></div>
-    <p class="hint" style="text-align:left;margin:6px 0 0;color:var(--brand-dark);font-weight:600;">${infoDiskonBerikutnya(cart.length)}</p>
+    <p class="hint" style="text-align:left;margin:6px 0 0;color:var(--brand-dark);font-weight:600;">${infoDiskonBerikutnya(flat.length)}</p>
+    <button class="btn ghost small" style="margin-top:8px;" onclick="kosongkanKeranjang()">Kosongkan keranjang</button>
     <div class="cust-field"><label for="p-customer" style="${lbl}">Nama pelanggan</label><input id="p-customer" placeholder="Nama pembeli"></div>
     <div class="cust-field"><label for="p-phone" style="${lbl}">Nomor HP pelanggan</label><input id="p-phone" type="tel" inputmode="numeric" placeholder="08xxxxxxxxxx" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
     <div class="cust-field">
@@ -1264,7 +1450,7 @@ function checkout() {
   if (!customerPhone) { showToast('Isi nomor HP pelanggan dulu'); return; }
   if (!paymentSel) { showToast('Pilih metode pembayaran dulu'); return; }
   if (paymentSel === '__bank_custom__' && !bank) { showToast('Ketik nama banknya dulu'); return; }
-  const items = cart.map(c => ({ nama: c.nama, harga: c.harga, modal: c.modal, kode: c.id }));
+  const items = flatCart().map(c => ({ nama: c.nama, harga: c.harga, hargaAsli: c.hargaAsli, modal: c.modal, kode: c.id, kategori: c.kategori, ukuran: c.ukuran }));
   const hd = hitungDiskon(items);
   let bayar = hd.total, kembali = 0;
   if (paymentSel === 'Cash') {
@@ -1283,7 +1469,7 @@ function checkout() {
       const pool = SEED_PRODUCTS.filter(sp => sp.nama !== pr.nama);
       const pick = (pool.length ? pool : SEED_PRODUCTS)[Math.floor(Math.random() * (pool.length ? pool.length : SEED_PRODUCTS.length))];
       products.splice(idx, 1, lengkapi({ ...pick, id: genId(), status: 'Tersedia', createdAt: Date.now() }));
-      totalSold++;
+      totalSold += qtyBaris(c);
     }
   });
   saveProducts();
@@ -1293,6 +1479,9 @@ function checkout() {
 
   showToast('Transaksi selesai — ' + items.length + ' item terjual');
   cart = [];
+  manualSel = null;
+  document.getElementById('manual-code').value = '';
+  document.getElementById('manual-code-preview').innerHTML = '';
   renderCart();
   stopScan();
   renderReceipt(receipt);
@@ -1358,6 +1547,11 @@ function renderSaldo() {
     ${rows || '<p class="hint" style="margin:0;text-align:left;">Belum ada transaksi.</p>'}
   `;
 }
+function grupItem(items) {
+  const m = {};
+  items.forEach(i => { const k = (i.kode || i.nama) + '|' + i.harga; (m[k] || (m[k] = { ...i, qty: 0 })).qty++; });
+  return Object.values(m);
+}
 function strukBaris(r, mono) {
   const row = (a, b, bold) => mono
     ? `<div style="display:flex;justify-content:space-between;${bold ? 'font-weight:bold;' : ''}"><span>${a}</span><span>${b}</span></div>`
@@ -1378,7 +1572,7 @@ function renderReceipt(r) {
       <h3 style="text-align:center;font-family:'Courier New',monospace;">${toko}</h3>
       <p class="rmeta" style="text-align:center;">${info ? info + '<br>' : ''}${t.full}</p>
       <p class="rmeta">No: ${r.id} &middot; Kasir: ${escapeHtml(r.kasir || '-')}<br>Pembeli: ${escapeHtml(r.customer)} (${escapeHtml(r.phone)})</p>
-      ${r.items.map(i => `<div class="rline"><span>1 PCS ${escapeHtml(i.nama)}${i.kode ? ' [' + escapeHtml(i.kode) + ']' : ''}</span></div><div class="rline" style="opacity:.7;"><span>&nbsp;&nbsp;${formatRupiah(i.harga)}</span><span>${formatRupiah(i.harga)}</span></div>`).join('')}
+      ${grupItem(r.items).map(i => `<div class="rline"><span>${i.qty} PCS ${escapeHtml(i.nama)}${i.kode ? ' [' + escapeHtml(i.kode) + ']' : ''}</span></div><div class="rline" style="opacity:.7;"><span>&nbsp;&nbsp;${i.qty > 1 ? i.qty + ' × ' : ''}${formatRupiah(i.harga)}</span><span>${formatRupiah(i.harga * i.qty)}</span></div>`).join('')}
       ${strukBaris(r, false)}
       <p class="rmeta" style="text-align:center;margin-top:10px;">Terima kasih atas kunjungan Anda 🩷</p>
       <button class="btn ghost small" style="width:100%;margin-top:14px;" onclick="printReceipt('${r.id}')">Cetak struk</button>
@@ -1401,7 +1595,7 @@ function printReceipt(id) {
       <div style="border-top:1px dashed #000;"></div>
       <p style="font-size:12px;margin:8px 0;">No: ${id}&nbsp;&nbsp;Kasir: ${escapeHtml(r.kasir || '-')}<br>Pembeli: ${escapeHtml(r.customer)}<br>HP: ${escapeHtml(r.phone)}</p>
       <div style="border-top:1px dashed #000;margin-bottom:6px;"></div>
-      ${r.items.map(i => `<div style="margin:4px 0;">1 PCS ${escapeHtml(i.nama)}${i.kode ? '<br>&nbsp;&nbsp;Kode: ' + escapeHtml(i.kode) : ''}<div style="display:flex;justify-content:space-between;"><span>&nbsp;&nbsp;${formatRupiah(i.harga)}</span><span>${formatRupiah(i.harga)}</span></div></div>`).join('')}
+      ${grupItem(r.items).map(i => `<div style="margin:4px 0;">${i.qty} PCS ${escapeHtml(i.nama)}${i.kode ? '<br>&nbsp;&nbsp;Kode: ' + escapeHtml(i.kode) : ''}<div style="display:flex;justify-content:space-between;"><span>&nbsp;&nbsp;${i.qty > 1 ? i.qty + ' × ' : ''}${formatRupiah(i.harga)}</span><span>${formatRupiah(i.harga * i.qty)}</span></div></div>`).join('')}
       <div style="border-top:1px dashed #000;margin:6px 0;"></div>
       ${strukBaris(r, true)}
       <div style="border-top:1px dashed #000;margin:8px 0;"></div>
@@ -1512,8 +1706,21 @@ document.getElementById('btn-logout').addEventListener('click', () => {
   stopScan(); cart = []; renderCart(); showLogin();
 });
 function bootLogin() {
-  const hpId = new URLSearchParams(location.search).get('scan');
+  const qs = new URLSearchParams(location.search);
+  const hpId = qs.get('scan'), kodeQ = qs.get('k');
   if (hpId) { startHpMode(hpId); return; }
+  if (kodeQ) {
+    let pid = null;
+    try { pid = localStorage.getItem('nayla_hp_laptop_id'); } catch (e) {}
+    if (pid) { startHpMode(pid, kodeQ.trim().toUpperCase()); }
+    else {
+      document.getElementById('hp-mode').style.display = 'flex';
+      hpStatus('HP ini belum dipasangkan dengan laptop kasir.');
+      hpHasil('Di laptop: tab Transaksi → Hubungkan HP, scan QR pairingnya dengan HP ini, lalu scan label lagi.');
+      document.getElementById('btn-hp-kamera').style.display = 'none';
+    }
+    return;
+  }
   loadSettings();
   let nm = null;
   try { nm = sessionStorage.getItem('nayla_session'); } catch (e) {}
@@ -1579,40 +1786,233 @@ function rentangLaporan() {
   }
   return [0, Infinity];
 }
+function labelPeriode() {
+  const sel = document.getElementById('lap-periode');
+  if (sel.value !== 'rentang') return sel.options[sel.selectedIndex].text;
+  return (document.getElementById('lap-dari').value || 'awal') + ' s/d ' + (document.getElementById('lap-sampai').value || 'sekarang');
+}
+const fTgl = ts => new Date(ts).toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+const dayKey = ts => { const d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+const punyaModal = r => r.items.every(i => typeof i.modal === 'number');
+const modalTrx = r => sum(r.items, i => i.modal || 0);
+const kategoriItem = i => i.kategori || (PRODUK_INFO[i.nama] && PRODUK_INFO[i.nama].kategori) || 'Lainnya';
+function kelompok(arr, keyFn, init, addFn) {
+  const m = {};
+  arr.forEach(x => { const k = keyFn(x); addFn(m[k] || (m[k] = init(k)), x); });
+  return Object.values(m);
+}
+function hitungLaporan() {
+  const [a, b] = rentangLaporan();
+  const list = receipts.filter(r => r.ts >= a && r.ts < b).sort((x, y) => x.ts - y.ts);
+  const L = { list, label: labelPeriode() };
+  const lm = list.filter(punyaModal);
+  L.trx = list.length;
+  L.produk = sum(list, r => r.items.length);
+  L.kotor = sum(list, r => r.subtotal != null ? r.subtotal : r.total);
+  L.diskon = sum(list, r => r.diskon || 0);
+  L.omzet = sum(list, r => r.total);
+  L.omzetM = sum(lm, r => r.total);
+  L.modal = sum(lm, modalTrx);
+  L.laba = L.omzetM - L.modal;
+  L.margin = L.omzetM ? L.laba / L.omzetM : 0;
+  L.rata = L.trx ? L.omzet / L.trx : 0;
+  L.tanpaModal = L.trx - lm.length;
+  L.hari = kelompok(list, r => dayKey(r.ts), k => ({ t: Number(k), n: 0, produk: 0, omzet: 0, diskon: 0, laba: 0 }),
+    (h, r) => { h.n++; h.produk += r.items.length; h.omzet += r.total; h.diskon += r.diskon || 0; if (punyaModal(r)) h.laba += r.total - modalTrx(r); }).sort((x, y) => x.t - y.t);
+  L.metode = kelompok(list, r => r.paymentMethod || 'Lainnya', k => ({ k, n: 0, omzet: 0 }), (m, r) => { m.n++; m.omzet += r.total; }).sort((x, y) => y.omzet - x.omzet);
+  L.kasir = kelompok(list, r => r.kasir || '-', k => ({ k, n: 0, produk: 0, omzet: 0 }), (m, r) => { m.n++; m.produk += r.items.length; m.omzet += r.total; }).sort((x, y) => y.omzet - x.omzet);
+  const items = [];
+  list.forEach(r => r.items.forEach(i => items.push({ r, i })));
+  const tambah = (m, x) => { m.qty++; m.jual += x.i.harga; if (typeof x.i.modal === 'number') m.laba += x.i.harga - x.i.modal; };
+  L.kategori = kelompok(items, x => kategoriItem(x.i), k => ({ k, qty: 0, jual: 0, laba: 0 }), tambah).sort((x, y) => y.jual - x.jual);
+  L.produkTop = kelompok(items, x => x.i.nama, k => ({ k, qty: 0, jual: 0, laba: 0 }), tambah).sort((x, y) => y.qty - x.qty || y.jual - x.jual).slice(0, 10);
+  L.pelanggan = kelompok(list, r => r.phone || r.customer, k => ({ nama: '', hp: '', n: 0, total: 0 }), (m, r) => { m.nama = r.customer; m.hp = r.phone; m.n++; m.total += r.total; }).sort((x, y) => y.total - x.total).slice(0, 10);
+  L.items = items;
+  L.tersedia = products.filter(p => p.status === 'Tersedia');
+  L.dipesan = products.filter(p => p.status === 'Dipesan');
+  return L;
+}
+function bagianLaporan(L) {
+  const nl = (arr, f) => sum(arr, f);
+  const S = [];
+  S.push({ judul: 'Ringkasan', kolom: [{ h: 'Indikator', t: 't', w: 36 }, { h: 'Nilai', t: 't', w: 28, a: 'r' }], baris: [
+    ['Periode', L.label], ['Jumlah transaksi', { v: L.trx, t: 'n' }], ['Produk terjual', { v: L.produk, t: 'n' }],
+    ['Penjualan kotor (sebelum diskon)', { v: L.kotor, t: 'rp' }], ['Diskon diberikan', { v: L.diskon, t: 'rp' }], ['Omzet bersih (setelah diskon)', { v: L.omzet, t: 'rp' }],
+    ['Rata-rata per transaksi', { v: Math.round(L.rata), t: 'rp' }], ['Modal barang terjual', { v: L.modal, t: 'rp' }], ['Laba kotor', { v: L.laba, t: 'rp' }], ['Margin laba', { v: L.margin, t: 'pct' }]] });
+  S.push({ judul: 'Penjualan per hari', kolom: [{ h: 'Tanggal', t: 't', w: 22 }, { h: 'Transaksi', t: 'n', w: 11 }, { h: 'Produk', t: 'n', w: 9 }, { h: 'Diskon', t: 'rp', w: 15 }, { h: 'Omzet', t: 'rp', w: 16 }, { h: 'Laba kotor', t: 'rp', w: 16 }],
+    baris: L.hari.slice().reverse().map(h => [fTgl(h.t), h.n, h.produk, h.diskon, h.omzet, h.laba]), total: ['Total', L.trx, L.produk, L.diskon, L.omzet, L.laba] });
+  S.push({ judul: 'Per metode pembayaran', kolom: [{ h: 'Metode', t: 't', w: 26 }, { h: 'Transaksi', t: 'n', w: 11 }, { h: 'Omzet', t: 'rp', w: 16 }, { h: 'Porsi', t: 'pct', w: 9 }],
+    baris: L.metode.map(m => [m.k, m.n, m.omzet, L.omzet ? m.omzet / L.omzet : 0]) });
+  S.push({ judul: 'Per kasir', kolom: [{ h: 'Kasir', t: 't', w: 22 }, { h: 'Transaksi', t: 'n', w: 11 }, { h: 'Produk', t: 'n', w: 9 }, { h: 'Omzet', t: 'rp', w: 16 }],
+    baris: L.kasir.map(k => [k.k, k.n, k.produk, k.omzet]) });
+  S.push({ judul: 'Per kategori produk', kolom: [{ h: 'Kategori', t: 't', w: 20 }, { h: 'Terjual (pcs)', t: 'n', w: 13 }, { h: 'Penjualan', t: 'rp', w: 16 }, { h: 'Laba item', t: 'rp', w: 16 }],
+    baris: L.kategori.map(k => [k.k, k.qty, k.jual, k.laba]) });
+  S.push({ judul: 'Produk terlaris (Top 10)', kolom: [{ h: 'Produk', t: 't', w: 32 }, { h: 'Terjual', t: 'n', w: 9 }, { h: 'Penjualan', t: 'rp', w: 16 }, { h: 'Laba item', t: 'rp', w: 16 }],
+    baris: L.produkTop.map(k => [k.k, k.qty, k.jual, k.laba]) });
+  S.push({ judul: 'Pelanggan teratas', kolom: [{ h: 'Nama', t: 't', w: 22 }, { h: 'No. HP', t: 't', w: 16 }, { h: 'Transaksi', t: 'n', w: 11 }, { h: 'Total belanja', t: 'rp', w: 16 }],
+    baris: L.pelanggan.map(c => [c.nama, c.hp, c.n, c.total]) });
+  S.push({ judul: 'Stok saat ini', kolom: [{ h: 'Status', t: 't', w: 16 }, { h: 'Jumlah produk', t: 'n', w: 14 }, { h: 'Nilai modal', t: 'rp', w: 16 }, { h: 'Nilai jual', t: 'rp', w: 16 }],
+    baris: [['Tersedia', L.tersedia.length, nl(L.tersedia, p => p.modal || 0), nl(L.tersedia, p => p.harga)], ['Dipesan', L.dipesan.length, nl(L.dipesan, p => p.modal || 0), nl(L.dipesan, p => p.harga)]],
+    total: ['Total', L.tersedia.length + L.dipesan.length, nl(L.tersedia, p => p.modal || 0) + nl(L.dipesan, p => p.modal || 0), nl(L.tersedia, p => p.harga) + nl(L.dipesan, p => p.harga)] });
+  S.push({ judul: 'Daftar transaksi', kolom: [{ h: 'No. struk', t: 't', w: 18 }, { h: 'Waktu', t: 't', w: 24 }, { h: 'Pelanggan', t: 't', w: 18 }, { h: 'No. HP', t: 't', w: 14 }, { h: 'Kasir', t: 't', w: 12 }, { h: 'Pembayaran', t: 't', w: 16 }, { h: 'Item', t: 'n', w: 7 }, { h: 'Subtotal', t: 'rp', w: 14 }, { h: 'Diskon', t: 'rp', w: 12 }, { h: 'Total', t: 'rp', w: 14 }, { h: 'Laba', t: 'rp', w: 14 }],
+    baris: L.list.slice().reverse().map(r => [r.id, formatTanggalWaktu(r.ts).full, r.customer, r.phone, r.kasir || '-', r.paymentMethod || '-', r.items.length, r.subtotal != null ? r.subtotal : r.total, r.diskon || 0, r.total, punyaModal(r) ? r.total - modalTrx(r) : '']) });
+  S.push({ judul: 'Detail item terjual', excelOnly: true, kolom: [{ h: 'No. struk', t: 't', w: 18 }, { h: 'Waktu', t: 't', w: 24 }, { h: 'Kode', t: 't', w: 14 }, { h: 'Produk', t: 't', w: 32 }, { h: 'Kategori', t: 't', w: 14 }, { h: 'Harga', t: 'rp', w: 14 }, { h: 'Modal', t: 'rp', w: 14 }, { h: 'Laba item', t: 'rp', w: 14 }],
+    baris: L.items.map(x => [x.r.id, formatTanggalWaktu(x.r.ts).full, x.i.kode || '', x.i.nama, kategoriItem(x.i), x.i.harga, typeof x.i.modal === 'number' ? x.i.modal : '', typeof x.i.modal === 'number' ? x.i.harga - x.i.modal : '']) });
+  return S;
+}
+function selCell(c, def) { return (c !== null && typeof c === 'object' && 't' in c) ? c : { v: c, t: def }; }
+function fmtCell(c) {
+  if (c.v === '' || c.v == null) return '';
+  if (c.t === 'rp') return formatRupiah(c.v);
+  if (c.t === 'pct') return (c.v * 100).toFixed(1) + '%';
+  if (c.t === 'n') return Number(c.v).toLocaleString('id-ID');
+  return escapeHtml(c.v);
+}
+function tabelHtml(sec) {
+  const rata = (k, c) => (k.a || (c.t === 't' ? 'l' : 'r')) === 'r' ? 'right' : 'left';
+  const head = sec.kolom.map(k => `<th style="text-align:${(k.a || (k.t === 't' ? 'l' : 'r')) === 'r' ? 'right' : 'left'}">${escapeHtml(k.h)}</th>`).join('');
+  const row = (r, tot) => `<tr${tot ? ' class="tot"' : ''}>` + sec.kolom.map((k, i) => { const c = selCell(r[i], k.t); return `<td style="text-align:${rata(k, c)}">${fmtCell(c)}</td>`; }).join('') + '</tr>';
+  const body = sec.baris.length ? sec.baris.map(r => row(r)).join('') : `<tr><td colspan="${sec.kolom.length}" style="text-align:center;opacity:.6;">Tidak ada data</td></tr>`;
+  return `<div style="overflow-x:auto;"><table class="tb"><thead><tr>${head}</tr></thead><tbody>${body}${sec.total ? row(sec.total, true) : ''}</tbody></table></div>`;
+}
+function kpiHtml(L) {
+  const k = (l, v) => `<div class="k"><span>${l}</span><b>${v}</b></div>`;
+  return `<div class="kpi">${k('Omzet bersih', formatRupiah(L.omzet))}${k('Laba kotor', formatRupiah(L.laba))}${k('Margin laba', (L.margin * 100).toFixed(1) + '%')}${k('Transaksi', L.trx)}${k('Produk terjual', L.produk)}${k('Rata-rata / transaksi', formatRupiah(Math.round(L.rata)))}</div>`;
+}
+function grafikHari(L) {
+  const hh = L.hari.slice(-31);
+  const mx = Math.max(1, ...hh.map(h => h.omzet));
+  return hh.map(h => `<div style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:11.5px;"><span style="width:58px;flex:none;">${new Date(h.t).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span><span style="flex:1;"><span style="display:block;height:9px;border-radius:5px;background:#db4b85;width:${Math.max(1, h.omzet / mx * 100)}%;"></span><span style="display:block;height:6px;border-radius:4px;background:#4a8d6f;margin-top:2px;width:${Math.max(0, h.laba / mx * 100)}%;"></span></span><span style="width:86px;flex:none;text-align:right;">${formatRupiah(h.omzet)}</span></div>`).join('')
+    + '<p style="font-size:11px;margin:8px 0 0;"><span style="color:#db4b85;">■</span> Omzet &nbsp; <span style="color:#4a8d6f;">■</span> Laba kotor</p>';
+}
+function catatanLaporan(L) {
+  let t = '';
+  if (L.tanpaModal) t += `<p class="hint" style="text-align:left;margin:8px 0 0;">${L.tanpaModal} transaksi lama tanpa harga modal tidak dihitung ke laba.</p>`;
+  if (products.some(p => p.modalPerkiraan)) t += '<p class="hint" style="text-align:left;margin:8px 0 0;">Sebagian harga modal produk masih perkiraan (60% dari harga jual). Isi yang sebenarnya lewat Ubah produk di Katalog.</p>';
+  return t;
+}
 function renderLaporan() {
   const el = document.getElementById('lap-isi');
-  const [a, b] = rentangLaporan();
-  const list = receipts.filter(r => r.ts >= a && r.ts < b);
-  if (!list.length) { el.innerHTML = '<div class="empty">Belum ada transaksi di periode ini.</div>'; return; }
-  const row = (l, v, bold) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line);font-size:14px;${bold ? 'font-weight:700;color:var(--brand-dark);' : ''}"><span>${l}</span><span>${v}</span></div>`;
-  const omzet = sum(list, r => r.total), diskon = sum(list, r => r.diskon || 0), produk = sum(list, r => r.items.length);
-  const adaModal = list.filter(r => r.items.every(i => typeof i.modal === 'number'));
-  const omzetM = sum(adaModal, r => r.total), modal = sum(adaModal, r => sum(r.items, i => i.modal));
-  const laba = omzetM - modal;
-  const margin = omzetM ? Math.round(laba / omzetM * 1000) / 10 : 0;
-  const hari = {};
-  list.forEach(r => {
-    const d = new Date(r.ts); const k = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const h = hari[k] || (hari[k] = { n: 0, omzet: 0, laba: 0 });
-    h.n++; h.omzet += r.total;
-    if (r.items.every(i => typeof i.modal === 'number')) h.laba += r.total - sum(r.items, i => i.modal);
-  });
-  const metode = {};
-  list.forEach(r => { const m = r.paymentMethod || 'Lainnya'; metode[m] = (metode[m] || 0) + r.total; });
-  const perkiraan = products.some(p => p.modalPerkiraan);
-  el.innerHTML = `
-    <div class="card">
-      ${row('Jumlah transaksi', list.length)}${row('Produk terjual', produk)}
-      ${row('Omzet (setelah diskon)', formatRupiah(omzet))}${row('Diskon diberikan', formatRupiah(diskon))}
-      ${row('Modal barang terjual', formatRupiah(modal))}${row('Laba kotor', formatRupiah(laba), true)}${row('Margin laba', margin + '%')}
-      ${adaModal.length < list.length ? `<p class="hint" style="text-align:left;margin:8px 0 0;">${list.length - adaModal.length} transaksi lama tanpa harga modal tidak dihitung ke laba.</p>` : ''}
-      ${perkiraan ? '<p class="hint" style="text-align:left;margin:8px 0 0;">Sebagian harga modal produk masih perkiraan (60% dari harga jual). Isi yang sebenarnya lewat Ubah produk di Katalog.</p>' : ''}
-    </div>
-    <h2 class="section-title" style="margin-top:16px;">Per hari</h2>
-    <div class="card">${Object.keys(hari).sort((x, y) => y - x).map(k => { const h = hari[k]; return row(new Date(Number(k)).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ' · ' + h.n + ' trx', formatRupiah(h.omzet) + ' / laba ' + formatRupiah(h.laba)); }).join('')}</div>
-    <h2 class="section-title" style="margin-top:16px;">Per metode pembayaran</h2>
-    <div class="card">${Object.keys(metode).map(m => row(escapeHtml(m), formatRupiah(metode[m]))).join('')}</div>`;
+  const L = hitungLaporan();
+  if (!L.trx) { el.innerHTML = '<div class="empty">Belum ada transaksi di periode ini.</div>'; return; }
+  const secs = bagianLaporan(L).filter(x => !x.excelOnly && x.judul !== 'Ringkasan');
+  el.innerHTML = kpiHtml(L) + catatanLaporan(L)
+    + '<h2 class="section-title" style="margin-top:16px;">Omzet &amp; laba per hari</h2><div class="card">' + grafikHari(L) + '</div>'
+    + secs.map(x => `<h2 class="section-title" style="margin-top:16px;">${x.judul}</h2><div class="card">${tabelHtml(x)}</div>`).join('');
 }
+function unduhBlob(blob, nama) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nama;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+const tglFile = () => new Date().toISOString().slice(0, 10);
+const namaToko = () => (settings.toko || 'Toko').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
+// --- PDF: halaman laporan siap cetak (pilih "Simpan sebagai PDF") ---
+function cetakLaporan() {
+  const L = hitungLaporan();
+  if (!L.trx) { showToast('Belum ada transaksi di periode ini'); return; }
+  const secs = bagianLaporan(L).filter(x => !x.excelOnly && x.judul !== 'Ringkasan');
+  const w = window.open('', '_blank');
+  if (!w) { showToast('Pop-up diblokir, izinkan pop-up untuk mengunduh PDF'); return; }
+  w.document.write(`<html><head><meta charset="utf-8"><title>Laporan ${escapeHtml(settings.toko || '')} ${escapeHtml(L.label)}</title><style>
+    @page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#2a0f1a;font-size:12px;margin:0}
+    h1{color:#a41f5c;margin:0;font-size:22px}h2{color:#a41f5c;font-size:14px;margin:18px 0 6px;border-bottom:2px solid #fbdce6;padding-bottom:3px}
+    .sub{color:#7a4a5c;margin:2px 0 12px}.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.k{border:1px solid #f0c9d6;border-radius:8px;padding:8px}
+    .k span{display:block;font-size:10.5px;color:#7a4a5c}.k b{font-size:15px;color:#a41f5c}.hint{color:#7a4a5c;font-size:11px;margin:6px 0}
+    table.tb{width:100%;border-collapse:collapse;font-size:10.5px}table.tb th{background:#fbdce6;padding:5px 6px;white-space:nowrap}table.tb td{padding:4px 6px;border-bottom:1px solid #f0c9d6}
+    table.tb tr.tot td{font-weight:bold;background:#fdf1f4}section{break-inside:avoid}</style></head><body>
+    <h1>${escapeHtml(settings.toko || "Nayla's Thrift")}</h1>
+    <div class="sub">Laporan penjualan &amp; laba — ${escapeHtml(L.label)}<br>${settings.alamat ? escapeHtml(settings.alamat) + '<br>' : ''}Dibuat ${formatTanggalWaktu(Date.now()).full} oleh ${escapeHtml(currentUser ? currentUser.nama : '-')}</div>
+    ${kpiHtml(L)}${catatanLaporan(L)}
+    <h2>Omzet &amp; laba per hari</h2>${grafikHari(L)}
+    ${secs.map(x => `<section><h2>${x.judul}</h2>${tabelHtml(x)}</section>`).join('')}
+    <script>window.onload = () => setTimeout(() => window.print(), 300)<\/script></body></html>`);
+  w.document.close();
+}
+// --- Excel (.xlsx) dibuat langsung di browser, tanpa pustaka ---
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function buatZip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(12, 0x21, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(14, 0x21, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + data.length;
+  });
+  const cd = central.reduce((n, x) => n + x.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cd, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+const xmlEsc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function colName(i) { let n = i + 1, s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function sheetXml(rows, widths) {
+  const cols = widths && widths.length ? '<cols>' + widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>' : '';
+  const data = rows.map((row, r) => `<row r="${r + 1}">` + row.map((c, ci) => {
+    if (c === null || c === undefined || c === '') return '';
+    const cell = typeof c === 'object' ? c : { v: c };
+    const ref = colName(ci) + (r + 1), st = cell.s ? ` s="${cell.s}"` : '';
+    return typeof cell.v === 'number' ? `<c r="${ref}"${st}><v>${cell.v}</v></c>` : `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(cell.v)}</t></is></c>`;
+  }).join('') + '</row>').join('');
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' + cols + '<sheetData>' + data + '</sheetData></worksheet>';
+}
+function buatXlsx(sheets) {
+  const H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const RT = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const styles = H + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;Rp&quot;#,##0"/><numFmt numFmtId="165" formatCode="0.0%"/></numFmts>'
+    + '<fonts count="4"><font><sz val="11"/><color rgb="FF2A0F1A"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF2A0F1A"/><name val="Calibri"/></font><font><b/><sz val="14"/><color rgb="FFA41F5C"/><name val="Calibri"/></font><font><sz val="11"/><color rgb="FF7A4A5C"/><name val="Calibri"/></font></fonts>'
+    + '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFBDCE6"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFDF1F4"/><bgColor indexed="64"/></patternFill></fill></fills>'
+    + '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFF0C9D6"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="13"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+    + '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+    + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    + '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="164" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1"/></cellXfs></styleSheet>';
+  const files = [
+    { name: '[Content_Types].xml', data: H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + sheets.map((x, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') + '</Types>' },
+    { name: '_rels/.rels', data: H + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${RT}/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: 'xl/workbook.xml', data: H + `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${RT}"><sheets>` + sheets.map((x, i) => `<sheet name="${xmlEsc(x.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', data: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map((x, i) => `<Relationship Id="rId${i + 1}" Type="${RT}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') + `<Relationship Id="rId${sheets.length + 1}" Type="${RT}/styles" Target="styles.xml"/></Relationships>` },
+    { name: 'xl/styles.xml', data: styles }
+  ];
+  sheets.forEach((x, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: sheetXml(x.rows, x.widths) }));
+  return buatZip(files);
+}
+function barisSheet(sec, L) {
+  const rows = [[{ v: sec.judul + ' — ' + (settings.toko || ''), s: 4 }], [{ v: 'Periode: ' + L.label, s: 7 }], [{ v: 'Dibuat: ' + formatTanggalWaktu(Date.now()).full + ' oleh ' + (currentUser ? currentUser.nama : '-'), s: 7 }], []];
+  rows.push(sec.kolom.map(k => ({ v: k.h, s: 1 })));
+  const conv = (r, tebal) => sec.kolom.map((k, i) => {
+    const c = selCell(r[i], k.t);
+    if (c.v === '' || c.v == null) return '';
+    if (c.t === 'rp') return { v: Number(c.v), s: tebal ? 12 : 9 };
+    if (c.t === 'pct') return { v: Number(c.v), s: 10 };
+    if (c.t === 'n') return { v: Number(c.v), s: tebal ? 11 : 8 };
+    return { v: String(c.v), s: tebal ? 11 : 8 };
+  });
+  sec.baris.forEach(r => rows.push(conv(r)));
+  if (sec.total) rows.push(conv(sec.total, true));
+  return rows;
+}
+function unduhExcel() {
+  const L = hitungLaporan();
+  if (!L.trx) { showToast('Belum ada transaksi di periode ini'); return; }
+  const sheets = bagianLaporan(L).map(sec => ({ name: sec.judul.replace(/[\\/?*\[\]:]/g, '').slice(0, 31), rows: barisSheet(sec, L), widths: sec.kolom.map(k => k.w || 14) }));
+  unduhBlob(buatXlsx(sheets), 'Laporan-' + namaToko() + '-' + tglFile() + '.xlsx');
+  showToast('Excel diunduh');
+}
+document.getElementById('btn-lap-pdf').addEventListener('click', cetakLaporan);
+document.getElementById('btn-lap-xlsx').addEventListener('click', unduhExcel);
 document.getElementById('lap-periode').addEventListener('change', function () {
   document.getElementById('lap-rentang').style.display = this.value === 'rentang' ? 'flex' : 'none';
   renderLaporan();
@@ -1625,6 +2025,9 @@ loadTotalSold();
 renderKatalog();
 renderSaldo();
 bootLogin();
+if ('serviceWorker' in navigator && /^https?:/.test(location.protocol)) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 </script>
 </body>
 </html>
